@@ -1,0 +1,368 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.19.0
+  name: evictionrequests.evictionrequest.coordination.uber.com
+spec:
+  group: evictionrequest.coordination.uber.com
+  names:
+    kind: EvictionRequest
+    listKind: EvictionRequestList
+    plural: evictionrequests
+    shortNames:
+    - evreq
+    singular: evictionrequest
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - description: Target pod for eviction
+      jsonPath: .spec.target.podRef.name
+      name: Pod
+      type: string
+    - description: Current active interceptor
+      jsonPath: .status.activeInterceptorClass
+      name: ActiveInterceptor
+      type: string
+    - description: Last heartbeat
+      jsonPath: .status.heartbeatTime
+      name: Heartbeat
+      type: date
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: EvictionRequest is the Schema for the evictionrequests API
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: |-
+              Spec defines the eviction request specification.
+              https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#spec-and-status
+              This field is required.
+            properties:
+              heartbeatDeadlineSeconds:
+                default: 1800
+                description: |-
+                  HeartbeatDeadlineSeconds is a maximum amount of time an interceptor should take to report on
+                  an eviction progress by updating the .status.heartbeatTime.
+                  If the .status.heartbeatTime is not updated within the duration of
+                  HeartbeatDeadlineSeconds, the eviction request is passed over to the next interceptor with the
+                  highest priority. If there is none, the pod is evicted using the Eviction API.
+
+                  The minimum value is 600 (10m) and the maximum value is 86400 (24h).
+                  The default value is 1800 (30m).
+                  This field is required and immutable.
+                format: int32
+                maximum: 86400
+                minimum: 600
+                type: integer
+              interceptors:
+                description: |-
+                  Interceptors reference interceptors that respond to this eviction request.
+                  Interceptors should observe and communicate through the EvictionRequest API to help with
+                  the graceful eviction of a target (e.g. termination of a pod).
+
+                  This field does not need to be set and is resolved when the EvictionRequest object is created
+                  on admission. It can be populated from multiple sources:
+                  - Pod's .spec.evictionInterceptors
+
+                  The maximum length of the interceptors list is 300. The number of interceptors is limited to
+                  50 in the 9900-10099 interval and to 250 outside of this interval.
+                  This field is immutable.
+                items:
+                  description: |-
+                    Interceptor allows you to identify the interceptor responding to the EvictionRequest.
+                    Interceptors should observe and communicate through the EvictionRequest API to help with
+                    the graceful eviction of a target (e.g. termination of a pod).
+                  properties:
+                    interceptorClass:
+                      description: |-
+                        InterceptorClass must be RFC-1123 DNS subdomain identifying the interceptor (e.g.
+                        bar.example.com).
+                        This field must be unique for each interceptor.
+                        This field is required.
+                      format: hostname
+                      type: string
+                    priority:
+                      description: |-
+                        Priority for this InterceptorClass. Higher priorities are selected first by the eviction
+                        request controller. The interceptor that is the managing controller should set the value of
+                        this field to 10000 to allow both for preemption or fallback registration by other
+                        interceptors.
+
+                        Priorities 9900-10099 are reserved for interceptors with a class that has the same parent
+                        domain as the controller interceptor. Duplicate priorities are not allowed in this interval.
+
+                        The number of interceptors is limited to 50 in the 9900-10099 interval and to 250
+                        outside of this interval.
+                        The minimum value is 0 and the maximum value is 100000.
+                      format: int32
+                      maximum: 100000
+                      minimum: 0
+                      type: integer
+                    role:
+                      description: |-
+                        Role of the interceptor. The "controller" value is reserved for the managing controller of
+                        the pod. The role can send additional signal to other interceptors if they should preempt
+                        this interceptor or not.
+                      type: string
+                  required:
+                  - interceptorClass
+                  - priority
+                  type: object
+                maxItems: 300
+                type: array
+                x-kubernetes-list-map-keys:
+                - interceptorClass
+                x-kubernetes-list-type: map
+              requesters:
+                description: |-
+                  At least one requester is required when creating an eviction request.
+                  A requester is also required for the eviction request to be processed.
+                  Empty list indicates that the eviction request should be canceled.
+
+                  This field cannot be modified if the .status.evictionRequestCancellationPolicy field is
+                  set to `Forbid`.
+                  It also cannot be modified once the eviction request has been completed (Complete condition is
+                  True).
+                items:
+                  description: Requester identifies the entity that is requesting
+                    the eviction.
+                  properties:
+                    name:
+                      description: |-
+                        Name must be RFC-1123 DNS subdomain identifying the requester (e.g.
+                        foo.example.com).
+                        Name of the requester.
+                        This field is required.
+                      type: string
+                  required:
+                  - name
+                  type: object
+                type: array
+                x-kubernetes-list-map-keys:
+                - name
+                x-kubernetes-list-type: map
+              target:
+                description: |-
+                  Target contains a reference to an object (e.g. a pod) that should be evicted.
+                  This field is immutable.
+                properties:
+                  podRef:
+                    description: |-
+                      PodRef references a pod that is subject to eviction/termination.
+                      Only one target (PodRef, *TBD*) is required.
+                      This field is immutable.
+                    properties:
+                      name:
+                        description: |-
+                          Name of the pod.
+                          This field is required.
+                        type: string
+                      uid:
+                        description: |-
+                          UID of the pod.
+                          This field is required.
+                        type: string
+                    required:
+                    - name
+                    - uid
+                    type: object
+                type: object
+              type:
+                default: Soft
+                description: |-
+                  Valid types are Soft.
+                  The default value is Soft.
+
+                  Soft type attempts to evict the target gracefully.
+                  Each active interceptor is given unlimited time to resolve the eviction request, provided
+                  that it responds periodically (see .spec.heartbeatDeadlineSeconds). This means there is no
+                  deadline for a single interceptor, or for the eviction request as a whole.
+
+                  For pod targets, the eviction request controller will call the /evict API endpoint when
+                  there are no more interceptors. This call may not succeed due to PodDisruptionBudgets, which
+                  may block the pod termination (see .status.podEvictionStatus.failedAPIEvictionCounter). A
+                  successful soft eviction request should ideally result in the pod being terminated gracefully.
+
+                  This field is immutable.
+                type: string
+            required:
+            - heartbeatDeadlineSeconds
+            - target
+            - type
+            type: object
+          status:
+            description: |-
+              Status represents the most recently observed status of the eviction request.
+              Populated by the current interceptor and eviction request controller.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#spec-and-status
+            properties:
+              activeInterceptorClass:
+                description: |-
+                  Interceptors of the ActiveInterceptorClass can adopt this eviction request by updating the
+                  HeartbeatTime or orphan/complete it by setting ActiveInterceptorCompleted to true.
+                  This field is managed by Kubernetes. It is cleared once the eviction request has completed.
+                type: string
+              activeInterceptorCompleted:
+                description: |-
+                  ActiveInterceptorCompleted should be set to true when the interceptor of the
+                  ActiveInterceptorClass has fully or partially completed (may result in pod termination).
+                  This field can also be set to true if no interceptor is available.
+                  If this field is true, there is no additional interceptor available, and the evicted pod is
+                  still running, it will be evicted using the Eviction API.
+                type: boolean
+              conditions:
+                description: |-
+                  Conditions can be used by interceptors to share additional information about the eviction
+                  request.
+                  See EvictionRequestConditionType for eviction request specific conditions.
+                items:
+                  description: Condition contains details for one aspect of the current
+                    state of this API Resource.
+                  properties:
+                    lastTransitionTime:
+                      description: |-
+                        lastTransitionTime is the last time the condition transitioned from one status to another.
+                        This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+                      format: date-time
+                      type: string
+                    message:
+                      description: |-
+                        message is a human readable message indicating details about the transition.
+                        This may be an empty string.
+                      maxLength: 32768
+                      type: string
+                    observedGeneration:
+                      description: |-
+                        observedGeneration represents the .metadata.generation that the condition was set based upon.
+                        For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
+                        with respect to the current state of the instance.
+                      format: int64
+                      minimum: 0
+                      type: integer
+                    reason:
+                      description: |-
+                        reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                        Producers of specific condition types may define expected values and meanings for this field,
+                        and whether the values are considered a guaranteed API.
+                        The value should be a CamelCase string.
+                        This field may not be empty.
+                      maxLength: 1024
+                      minLength: 1
+                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                      type: string
+                    status:
+                      description: status of the condition, one of True, False, Unknown.
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      type: string
+                    type:
+                      description: type of condition in CamelCase or in foo.example.com/CamelCase.
+                      maxLength: 316
+                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+                x-kubernetes-list-map-keys:
+                - type
+                x-kubernetes-list-type: map
+              evictionRequestCancellationPolicy:
+                default: Allow
+                description: |-
+                  EvictionRequestCancellationPolicy should be set to Forbid by the interceptor if it is not possible
+                  to cancel (delete) the eviction request.
+                  When this value is Forbid, DELETE requests of this EvictionRequest object will not be accepted
+                  while the pod exists.
+                  This field is not reset by the eviction request controller when selecting an interceptor.
+                  Changes to this field should always be reconciled by the active interceptor.
+
+                  Valid policies are Allow and Forbid.
+                  The default value is Allow.
+
+                  Allow policy allows cancellation of this eviction request.
+                  The EvictionRequest can be deleted before the Pod is fully terminated.
+
+                  Forbid policy forbids cancellation of this eviction request.
+                  The EvictionRequest can't be deleted until the Pod is fully terminated.
+
+                  This field is required.
+                enum:
+                - Allow
+                - Forbid
+                type: string
+              expectedInterceptorFinishTime:
+                description: |-
+                  ExpectedInterceptorFinishTime is the time at which the eviction process step is expected to
+                  end for the current interceptor and its class.
+                  May be empty if no estimate can be made.
+                format: date-time
+                type: string
+              heartbeatTime:
+                description: |-
+                  HeartbeatTime is the time at which the eviction process was reported to be in progress by
+                  the interceptor.
+                  Cannot be set to the future time (after taking time skew into account).
+                format: date-time
+                type: string
+              message:
+                description: |-
+                  Message is a human readable message indicating details about the eviction request.
+                  This may be an empty string.
+                maxLength: 32768
+                type: string
+              podEvictionStatus:
+                description: Pod-specific status that is populated during pod eviction.
+                properties:
+                  failedAPIEvictionCounter:
+                    default: 0
+                    description: |-
+                      The number of unsuccessful attempts to evict the referenced pod via the API-initiated eviction,
+                      e.g. due to a PodDisruptionBudget.
+                      This is set by the eviction controller after all the interceptors have completed.
+                      The minimum value is 0, and subsequent updates can only increase it.
+                    format: int32
+                    minimum: 0
+                    type: integer
+                required:
+                - failedAPIEvictionCounter
+                type: object
+            required:
+            - evictionRequestCancellationPolicy
+            - message
+            type: object
+        required:
+        - spec
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

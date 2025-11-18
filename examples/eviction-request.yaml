@@ -1,0 +1,14 @@
+apiVersion: evictionrequest.coordination.uber.com/v1alpha1
+kind: EvictionRequest
+metadata:
+  name: example-eviction-request
+spec:
+  interceptors:
+    - interceptorClass: example.com
+      priority: 100000
+  requesters:
+    - name: example-requester
+  target:
+    podRef:
+      name: example-pod
+      uid: POD_UID
